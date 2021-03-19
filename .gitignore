@@ -120,3 +120,5 @@ model/embedding/__params__
 test1.py
 test2.py
 test3.py
+*.xml
+.idea/Tollo-AI-Controller.iml
