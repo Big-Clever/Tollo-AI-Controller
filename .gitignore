@@ -112,3 +112,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+model/detection/__model__
+model/detection/__params__
+model/detection/infer_cfg.yml
+model/embedding/__model__
+model/embedding/__params__
+test1.py
+test2.py
+test3.py
