@@ -12,6 +12,8 @@ import deepsort
 import copy
 import av
 import FPS
+import gc
+from CameraMorse import CameraMorse
 
 
 def object_detector(frame, obj_res):
@@ -114,13 +116,13 @@ def drawPoints(img, points):
 
 def drawArrows(img, point, yaw):
     """绘制箭头"""
-    length = 8
+    length = 12
     angle = 45
     yaw += 90
     fpoint = [int(point[0] + length * math.cos(math.radians(yaw - 180))),
               int(point[1] + length * math.sin(math.radians(yaw - 180)))]
-    bpoint = [int(point[0] + length * math.cos(math.radians(yaw)) / 4),
-              int(point[1] + length * math.sin(math.radians(yaw)) / 4)]
+    bpoint = [int(point[0] + length * math.cos(math.radians(yaw)) / 6),
+              int(point[1] + length * math.sin(math.radians(yaw)) / 6)]
     lpoint = [int(point[0] + length * math.cos(math.radians(yaw - angle))),
               int(point[1] + length * math.sin(math.radians(yaw - angle)))]
     rpoint = [int(point[0] + length * math.cos(math.radians(yaw + angle))),
@@ -134,8 +136,10 @@ points = [[500, 500]]
 yaw = 0  # 偏航角
 battery = 0  # 电量
 wifi_strength = 0  # 信号强度
+fly_mode = 6
 mouse_x, mouse_y = 0, 0
 target_index = 0
+
 
 
 def capture_mouse_event(event, x, y, flags, params):
@@ -148,7 +152,7 @@ def capture_mouse_event(event, x, y, flags, params):
 
 def handler(event, sender, data, **args):
     drone = sender
-    global pos_x, pos_y, yaw, battery, wifi_strength, points
+    global pos_x, pos_y, yaw, battery, wifi_strength, points, fly_mode
     if event is drone.EVENT_LOG_DATA:  # 每秒15帧数据
         pos_x += data.mvo.vel_y / 15
         pos_y -= data.mvo.vel_x / 15
@@ -159,6 +163,7 @@ def handler(event, sender, data, **args):
     if event is drone.EVENT_FLIGHT_DATA:
         battery = data.battery_percentage
         wifi_strength = data.wifi_strength
+        fly_mode = data.fly_mode
 
 
 def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
@@ -166,13 +171,18 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
     WIFI = wifi_init.wifi()  # 实例化wifi类
     wifi_init.connect(WIFI)
 
-    global pos_x, pos_y, yaw, battery, wifi_strength, points, mouse_x, mouse_y, target_index
+    global pos_x, pos_y, yaw, battery, wifi_strength, points, mouse_x, mouse_y, target_index, fly_mode
     fly = uav.Uav()
     drone = fly.drone
     drone.subscribe(drone.EVENT_FLIGHT_DATA, handler)
     drone.subscribe(drone.EVENT_LOG_DATA, handler)
     cv2.namedWindow("UAV")
     cv2.setMouseCallback("UAV", capture_mouse_event)
+    cm = CameraMorse(display=True)
+
+    cm.define_command("--", fly.start_moter)
+    cm.define_command("..", drone.takeoff)
+    cm.define_command(".-", drone.land)
 
     retry = 3
     container = None
@@ -188,10 +198,16 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
     frame_skip = 300
     fps = FPS.FPS()
 
+    face_res_id = 0
+    target_res_id = 0
+    pose_res_id = 0
+
     width, height = 960, 720  # 图像宽度、高度
-    command = [0] * 4
-    Roll_pid = pid.PID(0.002, 0, 0.0001)
-    x_err_time = 0
+    command = [0.0] * 4
+    Yaw_pid = pid.PID(0.002, 0, 0.0005, 0, 0.6)
+    yaw_err_time = 0
+    fbrange = [250, 300]
+    fb_err_time = 0
 
     while True:
         for raw_frame in container.decode(video=0):
@@ -228,11 +244,12 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
                     faceListSize.append(right + bottom - left - top)
                     cv2.rectangle(image, (left, top), (right, bottom), (0, 255, 0), 2)  # 在图片中标注人脸，并显示
                 """人脸跟踪，输出偏航控制数据"""
-                # if len(faceListSize) != 0:
+                # if len(faceListSize) != 0 and face_res_id != id(face_res[-1]):
                 #     i = faceListSize.index(max(faceListSize))
                 #     x_err = faceListC[i][0] - width / 2
-                #     command[1] = Roll_pid.update(x_err)
-                #     x_err_time = time.perf_counter()
+                #     command[1] = Yaw_pid.update(x_err)
+                #     yaw_err_time = time.perf_counter()
+                face_res_id = id(face_res[-1])
             """目标跟踪数据处理"""
             if len(target_res) > 0:
                 for index, output in enumerate(target_res[-1]):
@@ -240,21 +257,40 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
                         if output[0] < mouse_x < output[2] and output[1] < mouse_y < output[3]:
                             target_index = output[-1]
                             mouse_x = 0
-                    if target_index != 0 and target_index == output[-1]:
+                    if target_index != 0 and target_index == output[-1]:  # 红色框出目标
                         cv2.rectangle(image, (output[0], output[1]), (output[2], output[3]), (0, 0, 255), 2)
-                    else:
+                        """目标跟踪控制"""
+                        if target_res_id != id(target_res[-1]):
+                            "输出偏航控制数据"
+                            x_err = (output[0] + output[2]) / 2 - width / 2
+                            command[1] = Yaw_pid.update(x_err)
+                            yaw_err_time = time.perf_counter()
+                            "输出前后控制数据"
+                            person_size = output[2] - output[0]
+                            if person_size < fbrange[0]:
+                                command[2] = (fbrange[0] - person_size) * 0.005
+                            elif person_size > fbrange[1]:
+                                command[2] = (fbrange[1] - person_size) * 0.005
+                            else:
+                                command[2] = 0
+                            fb_err_time = time.perf_counter()
+                    else:  # 绿色框出所有人
                         cv2.rectangle(image, (output[0], output[1]), (output[2], output[3]), (0, 255, 0), 2)
                     cv2.putText(image, str(output[-1]), (output[0], output[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                                 (255, 255, 255), 1)
+                target_res_id = id(target_res[-1])
             """图像及数据显示"""
             fps.update()
             cv2.putText(image, f"FPS:{int(fps.get())}", (850, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.putText(image, f"BAT:{battery}%", (850, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.putText(image, f"WIFI:{wifi_strength}%", (850, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(image, f"MODE:{fly_mode}", (850, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.imshow('UAV', image)
             """飞行控制"""
-            if time.perf_counter() - x_err_time > 0.3:
+            if time.perf_counter() - yaw_err_time > 1:
                 command[1] = 0
+            if time.perf_counter() - fb_err_time > 0.1:
+                command[2] = 0
             fly.control(command)
             """绘制航迹"""
             img = np.zeros((1000, 1000, 3), np.uint8)
@@ -262,6 +298,9 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
             drawArrows(img, points[-1], yaw)  # 画箭头
             cv2.imshow("track", img)
             cv2.waitKey(1)
+            gc.collect()  # 释放内存
+            if fly_mode == 1:
+                cm.eval(image)  # 摄像头作按键检测
             if raw_frame.time_base < 1.0 / 40:
                 time_base = 1.0 / 40
             else:
@@ -287,7 +326,7 @@ if __name__ == '__main__':
     Depth_estimation = Process(target=depth_estimation, args=(frame, depth_res))  # 深度估计进程
     """启动子进程"""
     Data_processing.start()  # 数据综合处理进程
-    Obj_detector.start()  # 物体检测进程
+    # Obj_detector.start()  # 物体检测进程
     # Face_detector.start()  # 人脸检测进程
     Human_track.start()  # 人类跟踪进程
     # Pose_estimation.start()  # 姿态检测进程

@@ -10,7 +10,7 @@ class Uav(object):
         self.drone.wait_for_connection(60.0)
         keyboard.hook(self.pressed_keys)  # 读取键盘按键
         self.key_data = [0] * 4
-        self.SPEED = 1
+        self.SPEED = 0.5  # 按键控制时飞行速度
 
     def rc_control(self, *rc_data):
         self.drone.set_throttle(rc_data[0])
@@ -46,6 +46,11 @@ class Uav(object):
         elif e.name == "right":  # right
             self.key_data[3] = data
 
+        elif e.name == "shift" and data == 1:  # shift 变速
+            if self.SPEED == 0.5:
+                self.SPEED = 1
+            else:
+                self.SPEED = 0.5
         elif e.name == "tab":  # tab 起飞
             self.drone.takeoff()
         elif e.name == "space":  # space 降落

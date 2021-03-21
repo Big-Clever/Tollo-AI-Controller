@@ -1,15 +1,24 @@
 import time
 
 
+def limit(value, value_limit):
+    if value > value_limit:
+        value = value_limit
+    elif value < -value_limit:
+        value = -value_limit
+    return value
+
+
 class PID:
     """PID控制器"""
 
-    def __init__(self, p, i, d, windup=0):
+    def __init__(self, p, i, d, windup, value_limit):
 
         self.Kp = p
         self.Ki = i
         self.Kd = d
         self.windup_guard = windup
+        self.value_limit = value_limit
         self.ITerm = 0
 
         self.last_time = 0
@@ -19,7 +28,7 @@ class PID:
         """计算给定参考反馈的PID值
            公式:u(t) = K_p e(t) + K_i \int_{0}^{t} e(t)dt + K_d {de}/{dt}
         """
-        current_time = time.time()
+        current_time = time.perf_counter()
         delta_time = current_time - self.last_time
         delta_error = error - self.last_error
 
@@ -29,7 +38,8 @@ class PID:
         PTerm = self.Kp * error
 
         if delta_time > 0.5:  # 若与上次控制时间相差0.5秒以上，则只返回比例项
-            return PTerm
+            res = limit(PTerm, self.value_limit)
+            return res
 
         self.ITerm += self.Ki * error * delta_time
 
@@ -44,6 +54,7 @@ class PID:
             DTerm = 0
 
         output = PTerm + self.ITerm + (self.Kd * DTerm)
+        output = limit(output, self.value_limit)
         # print(error, PTerm, self.ITerm, self.Kd * DTerm, output)
         return output
 

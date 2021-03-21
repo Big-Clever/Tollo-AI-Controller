@@ -456,12 +456,12 @@ class Detector():
         np_boxes = boxes_handle.copy_to_cpu()
         t2 = time.time()
         ms = (t2 - t1) * 1000.0
-        print("Inference: {} ms per batch image".format(ms))
+        # print("Inference: {} ms per batch image".format(ms))
 
         # do not perform postprocess in benchmark mode
         results = []
         if reduce(lambda x, y: x * y, np_boxes.shape) < 6:
-            print('[WARNNING] No object detected.')
+            # print('[WARNNING] No object detected.')
             results = None
         else:
             results = self.postprocess(
