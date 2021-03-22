@@ -14,6 +14,7 @@ import av
 import FPS
 import gc
 from CameraMorse import CameraMorse
+import DrawPose
 
 
 def object_detector(frame, obj_res):
@@ -66,18 +67,22 @@ def human_track(frame, target_res):
             target_res.pop(0)
 
 
-def pose_estimation(frame, pose_res):
+def pose_estimation(person_frame, pose_res):
     """骨骼关键点检测进程"""
     # 可选模型 openpose_body_estimation 和 openpose_hands_estimation
     pose_estimation = hub.Module(name="openpose_body_estimation")
-    while len(frame) == 0:
+    while len(person_frame) == 0:
         time.sleep(0.1)
     while True:
+        person_data = person_frame[-1]
         res = pose_estimation.predict(
-            img=frame[-1],
+            img=person_data[0],
             # scale=[0.5, 1.0, 1.5, 2.0],  # 识别手部关键点时,使用图片的不同尺度
             visualization=False)
-        pose_res.append(res)
+        if len(res["candidate"]) > 0 and len(res["subset"]) > 0:
+            pose_res.append([res, person_data[1], person_data[2]])
+        else:
+            pose_res.append([])
         if len(pose_res) > 1:
             pose_res.pop(0)
 
@@ -103,7 +108,7 @@ def quaternion2yaw(q0, q1, q2, q3):
     degree = math.pi / 180
     siny = 2.0 * (q0 * q3 + q1 * q2)
     cosy = 1.0 - 2.0 * (q2 * q2 + q3 * q3)
-    return int(math.atan2(siny, cosy)/degree)
+    return int(math.atan2(siny, cosy) / degree)
 
 
 def drawPoints(img, points):
@@ -117,7 +122,7 @@ def drawPoints(img, points):
 def drawArrows(img, point, yaw):
     """绘制箭头"""
     length = 12
-    angle = 45
+    angle = 40
     yaw += 90
     fpoint = [int(point[0] + length * math.cos(math.radians(yaw - 180))),
               int(point[1] + length * math.sin(math.radians(yaw - 180)))]
@@ -139,7 +144,6 @@ wifi_strength = 0  # 信号强度
 fly_mode = 6
 mouse_x, mouse_y = 0, 0
 target_index = 0
-
 
 
 def capture_mouse_event(event, x, y, flags, params):
@@ -166,7 +170,7 @@ def handler(event, sender, data, **args):
         fly_mode = data.fly_mode
 
 
-def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
+def data_processing(frame, person_frame, obj_res, face_res, target_res, pose_res, depth_res):
     """数据综合处理进程"""
     WIFI = wifi_init.wifi()  # 实例化wifi类
     wifi_init.connect(WIFI)
@@ -178,7 +182,8 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
     drone.subscribe(drone.EVENT_LOG_DATA, handler)
     cv2.namedWindow("UAV")
     cv2.setMouseCallback("UAV", capture_mouse_event)
-    cm = CameraMorse(display=True)
+    draw_pose = DrawPose.DrawPose()
+    cm = CameraMorse(display=False)
 
     cm.define_command("--", fly.start_moter)
     cm.define_command("..", drone.takeoff)
@@ -202,12 +207,18 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
     target_res_id = 0
     pose_res_id = 0
 
+    neck_length = 72  # 此处为2m时脖子长度
+    distance = 2
+    exp_distance = 2
+
     width, height = 960, 720  # 图像宽度、高度
     command = [0.0] * 4
     Yaw_pid = pid.PID(0.002, 0, 0.0005, 0, 0.6)
+    Pitch_pid = pid.PID(0.5, 0, 0.02, 0, 0.8)
+    Height_pid = pid.PID(0.002, 0, 0, 0, 0.5)
     yaw_err_time = 0
-    fbrange = [250, 300]
-    fb_err_time = 0
+    pitch_err_time = 0
+    height_err_time = 0
 
     while True:
         for raw_frame in container.decode(video=0):
@@ -230,7 +241,8 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
                         right = int(data["right"])
                         bottom = int(data["bottom"])
                         cv2.rectangle(image, (left, top), (right, bottom), (255, 100, 100), 2)
-                        cv2.putText(image, f"{data['label']}", (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 1)
+                        cv2.putText(image, f"{data['label']}", (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                    (100, 255, 100), 1)
             """人脸识别数据处理"""
             if len(face_res) > 0:
                 faceListC = []
@@ -257,28 +269,71 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
                         if output[0] < mouse_x < output[2] and output[1] < mouse_y < output[3]:
                             target_index = output[-1]
                             mouse_x = 0
-                    if target_index != 0 and target_index == output[-1]:  # 红色框出目标
-                        cv2.rectangle(image, (output[0], output[1]), (output[2], output[3]), (0, 0, 255), 2)
+                    """发现跟踪目标"""
+                    if target_index != 0 and target_index == output[-1]:
+                        cv2.rectangle(image, (output[0], output[1]), (output[2], output[3]), (0, 0, 255), 2)  # 红色框出目标
+                        cv2.putText(image, f"{distance:.1f}m", (output[0] - 50, output[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+                        """传递目标图像,用以检测骨骼关键点"""
+                        target_size = np.where(output >= 0, output, 0)
+                        if target_size[2] >= raw_image.shape[1]:
+                            target_size[2] = raw_image.shape[1] - 1
+                        if target_size[3] >= raw_image.shape[0]:
+                            target_size[3] = raw_image.shape[0] - 1
+                        person_pic = raw_image[target_size[1]:target_size[3], target_size[0]:target_size[2]]
+                        scale = 30000 / ((target_size[3] - target_size[1]) * (
+                                    target_size[2] - target_size[0]))  # 将图片缩小至30000个像素
+                        if scale < 1:
+                            person_pic = cv2.resize(person_pic, (0, 0), fx=scale, fy=scale,
+                                                    interpolation=cv2.INTER_AREA)
+                        person_frame.append([person_pic, target_size, scale])
+                        if len(person_frame) > 1:
+                            person_frame.pop(0)
                         """目标跟踪控制"""
                         if target_res_id != id(target_res[-1]):
                             "输出偏航控制数据"
                             x_err = (output[0] + output[2]) / 2 - width / 2
                             command[1] = Yaw_pid.update(x_err)
                             yaw_err_time = time.perf_counter()
-                            "输出前后控制数据"
-                            person_size = output[2] - output[0]
-                            if person_size < fbrange[0]:
-                                command[2] = (fbrange[0] - person_size) * 0.005
-                            elif person_size > fbrange[1]:
-                                command[2] = (fbrange[1] - person_size) * 0.005
-                            else:
-                                command[2] = 0
-                            fb_err_time = time.perf_counter()
                     else:  # 绿色框出所有人
                         cv2.rectangle(image, (output[0], output[1]), (output[2], output[3]), (0, 255, 0), 2)
-                    cv2.putText(image, str(output[-1]), (output[0], output[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                (255, 255, 255), 1)
+                    # cv2.putText(image, str(output[-1]), (output[0], output[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    #             (255, 255, 255), 1)
                 target_res_id = id(target_res[-1])
+            """骨骼关键点数据处理"""
+            if len(pose_res) > 0:
+                if len(pose_res[-1]) > 0:
+                    posedata = pose_res[-1][0]
+                    target_size = pose_res[-1][1]
+                    scale = pose_res[-1][2]
+                    if scale < 1:
+                        # print(posedata)
+                        posedata["candidate"][:, 0:2] = posedata["candidate"][:, 0:2] / scale
+                        image[target_size[1]:target_size[3], target_size[0]:target_size[2]] = draw_pose(
+                            image[target_size[1]:target_size[3], target_size[0]:target_size[2]], posedata["candidate"],
+                            posedata["subset"])
+                    if pose_res_id != id(pose_res[-1]):
+                        # print(posedata)
+                        clavicle_index = posedata["subset"][0][1]  # 锁骨中心点索引
+                        ear_index = [x for x in posedata["subset"][0][16:18] if x != -1]  # 检测到的耳朵索引
+                        """计算目标距离"""
+                        if clavicle_index != -1 and len(ear_index) > 0:
+                            clavicle_y = posedata["candidate"][int(clavicle_index)][1]  # 锁骨高度坐标
+                            ear_y = np.mean([posedata["candidate"][int(x)][1] for x in ear_index])  # 耳朵高度坐标
+                            distance = neck_length / (clavicle_y - ear_y) + distance * 0.5  # 计算距离
+                            "输出前后控制数据"
+                            pitch_err = distance - exp_distance
+                            command[2] = Pitch_pid.update(pitch_err)
+                            pitch_err_time = time.perf_counter()
+                        if clavicle_index != -1:
+                            clavicle_y = posedata["candidate"][int(clavicle_index)][1] + target_size[1]  # 锁骨高度坐标
+                            print("锁骨高度", clavicle_y)
+                            "输出高度控制数据"
+                            height_err = height / 2 - clavicle_y
+                            print("高度偏差", height_err)
+                            command[0] = Height_pid.update(height_err)
+                            print("命令输出", command[0])
+                            height_err_time = time.perf_counter()
+                pose_res_id = id(pose_res[-1])
             """图像及数据显示"""
             fps.update()
             cv2.putText(image, f"FPS:{int(fps.get())}", (850, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
@@ -289,8 +344,10 @@ def data_processing(frame, obj_res, face_res, target_res, pose_res, depth_res):
             """飞行控制"""
             if time.perf_counter() - yaw_err_time > 1:
                 command[1] = 0
-            if time.perf_counter() - fb_err_time > 0.1:
+            if time.perf_counter() - pitch_err_time > 0.3:
                 command[2] = 0
+            if time.perf_counter() - height_err_time > 0.3:
+                command[0] = 0
             fly.control(command)
             """绘制航迹"""
             img = np.zeros((1000, 1000, 3), np.uint8)
@@ -312,24 +369,25 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # 配置环境变量
     """创建进程共享列表"""
     frame = Manager().list()  # 当前图像像素列表
-    obj_res = Manager().list()  # 物体识别结果
-    face_res = Manager().list()  # 人脸识别结果
+    person_frame = Manager().list()  # 当前目标图像像素列表
+    obj_res = []  # Manager().list()  # 物体识别结果
+    face_res = []  # Manager().list()  # 人脸识别结果
     target_res = Manager().list()  # 目标检测结果
     pose_res = Manager().list()  # 姿态检测结果
-    depth_res = Manager().list()  # 深度估计结果
+    depth_res = []  # Manager().list()  # 深度估计结果
     """进程创建"""
-    Data_processing = Process(target=data_processing, args=(frame, obj_res, face_res, target_res, pose_res, depth_res))  # 数据综合处理进程
+    Data_processing = Process(target=data_processing, args=(frame, person_frame, obj_res, face_res, target_res, pose_res, depth_res))  # 数据综合处理进程
     Obj_detector = Process(target=object_detector, args=(frame, obj_res))  # 物体检测进程
     Face_detector = Process(target=face_detector, args=(frame, face_res))  # 人脸检测进程
     Human_track = Process(target=human_track, args=(frame, target_res))  # 人类跟踪进程
-    Pose_estimation = Process(target=pose_estimation, args=(frame, pose_res))  # 姿态检测进程
+    Pose_estimation = Process(target=pose_estimation, args=(person_frame, pose_res))  # 姿态检测进程
     Depth_estimation = Process(target=depth_estimation, args=(frame, depth_res))  # 深度估计进程
     """启动子进程"""
     Data_processing.start()  # 数据综合处理进程
     # Obj_detector.start()  # 物体检测进程
     # Face_detector.start()  # 人脸检测进程
     Human_track.start()  # 人类跟踪进程
-    # Pose_estimation.start()  # 姿态检测进程
+    Pose_estimation.start()  # 姿态检测进程
     # Depth_estimation.start()  # 深度估计进程
     """等待进程结束"""
     Data_processing.join()
