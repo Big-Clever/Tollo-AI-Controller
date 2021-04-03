@@ -122,3 +122,4 @@ test2.py
 test3.py
 *.xml
 .idea/Tollo-AI-Controller.iml
+.idea/.name
