@@ -375,10 +375,10 @@ def data_processing(share):
                             LWrist = get_body_kp("LWrist")
                             if check_var_exist(RShoulder, RElbow, RWrist, LShoulder, LElbow, LWrist):  # 若左臂右臂都检测到
                                 if distance(RShoulder, RWrist) < neck_length and distance(LShoulder, LWrist) < neck_length:  # 若左右手肘在左右肩附近
-                                    if RElbow[1] - RShoulder[1] < neck_length * 1.2 and LElbow[1] - LShoulder[1] < neck_length * 1.2:
-                                        exp_distance += 0.05
-                                    else:
-                                        exp_distance -= 0.05
+                                    if RElbow[1] - RShoulder[1] < neck_length * 1.2 and LElbow[1] - LShoulder[1] < neck_length * 1.2:  # 远离
+                                        exp_distance += 0.1
+                                    elif exp_distance > 1.5:  # 若目标距离大于1.5米，则接近
+                                        exp_distance -= 0.1
                             if check_var_exist(RShoulder, RElbow, RWrist):  # 若检测到右臂
                                 if abs(RShoulder[1] - RWrist[1]) < neck_length / 2 and abs(RShoulder[1] - RElbow[1]) < neck_length * 1.2:
                                     command[3] = (RWrist[0] - RShoulder[0]) / neck_length / 5
@@ -393,6 +393,11 @@ def data_processing(share):
                         height_err = height / 2 - clavicle_y
                         command[0] = Height_pid.update(height_err)
                         height_err_time = time.perf_counter()
+            """深度估计数据处理"""
+            depth_res = share.get("depth")
+            if depth_res is not None:
+                red_depth = np.where(depth_res > 600, 200, 0).astype("uint8")
+                image[:, :, 2] = cv2.add(image[:, :, 2], red_depth)
             """图像及数据显示"""
             fps.update()
             cv2.putText(image, f"FPS:{int(fps.get())}", (850, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
@@ -447,6 +452,5 @@ if __name__ == '__main__':
     # Depth_estimation.start()  # 深度估计进程
     """等待进程结束"""
     while True:
-        gc.collect()
+        gc.collect()  # 内存回收
         time.sleep(1)
-    # Data_processing.join()
