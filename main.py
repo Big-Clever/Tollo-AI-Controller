@@ -46,7 +46,7 @@ def drawPoints(img, points):
     """绘制航迹"""
     for point in points:
         cv2.circle(img, (int(point[0]), int(point[1])), 3, (0, 0, 255), cv2.FILLED)
-    cv2.putText(img, f"({((points[-1][0] - 500) / 10):.1f}, {-((points[-1][1] - 500) / 10):.1f})m",
+    cv2.putText(img, f"({((points[-1][0] - 360) / 10):.1f}, {-((points[-1][1] - 360) / 10):.1f})m",
                 (int(points[-1][0]) + 10, int(points[-1][1]) + 30), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 255), 1)
 
 
@@ -143,8 +143,8 @@ def depth_estimation(share):
             share["depth"] = res
 
 
-pos_x, pos_y = 500, 500  # 轨迹起始点坐标
-points = [[500, 500]]
+pos_x, pos_y = 360, 360  # 轨迹起始点坐标
+points = [[360, 360]]
 yaw = 0  # 偏航角
 battery = 0  # 电量
 wifi_strength = 0  # 信号强度
@@ -331,6 +331,8 @@ def data_processing(share):
                         scale = math.sqrt(30000 / ((target_size[3] - target_size[1]) * (target_size[2] - target_size[0])))  # 将图片缩小至30000个像素
                         if scale < 1:
                             person_pic = cv2.resize(person_pic, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                        else:
+                            person_pic = cv2.resize(person_pic, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
                         share["person_frame"] = [person_pic, target_size, scale]
                         """目标跟踪控制"""
                         if not np.all(operator.eq(target_res_last, target_res[0])):
@@ -347,8 +349,7 @@ def data_processing(share):
                 posedata = pose_res[0]
                 target_size = pose_res[1]
                 scale = pose_res[2]
-                if scale < 1:
-                    posedata["candidate"][:, 0:2] = posedata["candidate"][:, 0:2] / scale
+                posedata["candidate"][:, 0:2] = posedata["candidate"][:, 0:2] / scale
                 posedata["candidate"][:, 0] += target_size[0]
                 posedata["candidate"][:, 1] += target_size[1]
                 if time.perf_counter() - pose_time < 0.2:
@@ -375,10 +376,11 @@ def data_processing(share):
                             LWrist = get_body_kp("LWrist")
                             if check_var_exist(RShoulder, RElbow, RWrist, LShoulder, LElbow, LWrist):  # 若左臂右臂都检测到
                                 if distance(RShoulder, RWrist) < neck_length and distance(LShoulder, LWrist) < neck_length:  # 若左右手肘在左右肩附近
-                                    if RElbow[1] - RShoulder[1] < neck_length * 1.2 and LElbow[1] - LShoulder[1] < neck_length * 1.2:  # 远离
-                                        exp_distance += 0.1
+                                    if RElbow[1] - RShoulder[1] < neck_length * 1.2 and LElbow[1] - LShoulder[1] < neck_length * 1.2:  # 双手伸平
+                                        if exp_distance < 8:  # 若目标距离小于8米，则远离
+                                            exp_distance += 0.06
                                     elif exp_distance > 1.5:  # 若目标距离大于1.5米，则接近
-                                        exp_distance -= 0.1
+                                        exp_distance -= 0.06
                             if check_var_exist(RShoulder, RElbow, RWrist):  # 若检测到右臂
                                 if abs(RShoulder[1] - RWrist[1]) < neck_length / 2 and abs(RShoulder[1] - RElbow[1]) < neck_length * 1.2:
                                     command[3] = (RWrist[0] - RShoulder[0]) / neck_length / 5
@@ -398,15 +400,6 @@ def data_processing(share):
             if depth_res is not None:
                 red_depth = np.where(depth_res > 600, 200, 0).astype("uint8")
                 image[:, :, 2] = cv2.add(image[:, :, 2], red_depth)
-            """图像及数据显示"""
-            fps.update()
-            cv2.putText(image, f"FPS:{int(fps.get())}", (850, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-            cv2.putText(image, f"BAT:{battery}%", (850, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-            cv2.putText(image, f"WIFI:{wifi_strength}%", (850, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-            cv2.putText(image, f"MODE:{fly_mode}", (850, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-            cv2.putText(image, f"EXP:{exp_distance}", (850, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-
-            cv2.imshow('UAV', image)
             """飞行控制"""
             if time.perf_counter() - yaw_err_time > 0.6:
                 command[1] = 0
@@ -418,10 +411,19 @@ def data_processing(share):
                 command[3] = 0
             fly.control(command)
             """绘制航迹"""
-            img = np.zeros((1000, 1000, 3), np.uint8)
-            drawPoints(img, points)  # 画轨迹点
-            drawArrows(img, points[-1], yaw)  # 画箭头
-            cv2.imshow("track", img)
+            track = np.zeros((720, 720, 3), np.uint8)
+            drawPoints(track, points)  # 画轨迹点
+            drawArrows(track, points[-1], yaw)  # 画箭头
+            """图像及数据显示"""
+            fps.update()
+            cv2.putText(track, f"FPS:{int(fps.get())}", (500, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(track, f"BAT:{battery}%", (500, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(track, f"WIFI:{wifi_strength}%", (500, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(track, f"MODE:{fly_mode}", (500, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(track, f"EXP:{exp_distance:.1f}m", (500, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+
+            image = np.concatenate([image, track], axis=1)
+            cv2.imshow('UAV', image)
             cv2.waitKey(1)
             if fly_mode == 1:
                 cm.eval(image)  # 摄像头作按键检测
@@ -450,7 +452,7 @@ if __name__ == '__main__':
     Human_track.start()  # 人类跟踪进程
     Pose_estimation.start()  # 姿态检测进程
     # Depth_estimation.start()  # 深度估计进程
-    """等待进程结束"""
+
     while True:
         gc.collect()  # 内存回收
         time.sleep(1)
