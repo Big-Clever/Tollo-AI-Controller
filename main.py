@@ -46,7 +46,7 @@ def drawPoints(img, points):
     """绘制航迹"""
     for point in points:
         cv2.circle(img, (int(point[0]), int(point[1])), 3, (0, 0, 255), cv2.FILLED)
-    cv2.putText(img, f"({((points[-1][0] - 360) / 10):.1f}, {-((points[-1][1] - 360) / 10):.1f})m",
+    cv2.putText(img, f"({((points[-1][0] - 288) / 10):.1f}, {-((points[-1][1] - 360) / 10):.1f})m",
                 (int(points[-1][0]) + 10, int(points[-1][1]) + 30), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 255), 1)
 
 
@@ -57,13 +57,15 @@ def drawArrows(img, point, yaw):
     yaw += 90
     fpoint = [int(point[0] + length * math.cos(math.radians(yaw - 180))),
               int(point[1] + length * math.sin(math.radians(yaw - 180)))]
-    bpoint = [int(point[0] + length * math.cos(math.radians(yaw)) / 6),
-              int(point[1] + length * math.sin(math.radians(yaw)) / 6)]
+    bpoint = [int(point[0] + length * math.cos(math.radians(yaw)) / 3),
+              int(point[1] + length * math.sin(math.radians(yaw)) / 3)]
     lpoint = [int(point[0] + length * math.cos(math.radians(yaw - angle))),
               int(point[1] + length * math.sin(math.radians(yaw - angle)))]
     rpoint = [int(point[0] + length * math.cos(math.radians(yaw + angle))),
               int(point[1] + length * math.sin(math.radians(yaw + angle)))]
-    area = np.array([fpoint, lpoint, bpoint, rpoint])
+    area = np.array([fpoint, lpoint, bpoint])
+    cv2.fillConvexPoly(img, area, (0, 255, 0))
+    area = np.array([fpoint, bpoint, rpoint])
     cv2.fillConvexPoly(img, area, (0, 255, 0))
 
 
@@ -143,8 +145,8 @@ def depth_estimation(share):
             share["depth"] = res
 
 
-pos_x, pos_y = 360, 360  # 轨迹起始点坐标
-points = [[360, 360]]
+pos_x, pos_y = 288, 360  # 轨迹起始点坐标
+points = [[288, 360]]
 yaw = 0  # 偏航角
 battery = 0  # 电量
 wifi_strength = 0  # 信号强度
@@ -188,6 +190,8 @@ def data_processing(share):
     drone.subscribe(drone.EVENT_FLIGHT_DATA, handler)
     drone.subscribe(drone.EVENT_LOG_DATA, handler)
     cv2.namedWindow("UAV")
+    # cv2.setWindowProperty("UAV", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.resizeWindow("UAV", 1536, 720)
     cv2.setMouseCallback("UAV", capture_mouse_event)
     draw_pose = DrawPose.DrawPose()
     cm = CameraMorse(display=False)
@@ -376,8 +380,8 @@ def data_processing(share):
                             LWrist = get_body_kp("LWrist")
                             if check_var_exist(RShoulder, RElbow, RWrist, LShoulder, LElbow, LWrist):  # 若左臂右臂都检测到
                                 if distance(RShoulder, RWrist) < neck_length and distance(LShoulder, LWrist) < neck_length:  # 若左右手肘在左右肩附近
-                                    if RElbow[1] - RShoulder[1] < neck_length * 1.2 and LElbow[1] - LShoulder[1] < neck_length * 1.2:  # 双手伸平
-                                        if exp_distance < 8:  # 若目标距离小于8米，则远离
+                                    if RElbow[1] - RShoulder[1] < neck_length * 1.1 and LElbow[1] - LShoulder[1] < neck_length * 1.1:  # 双手伸平
+                                        if exp_distance < 6:  # 若目标距离小于8米，则远离
                                             exp_distance += 0.06
                                     elif exp_distance > 1.5:  # 若目标距离大于1.5米，则接近
                                         exp_distance -= 0.06
@@ -418,7 +422,7 @@ def data_processing(share):
             fps.update()
             cv2.putText(track, f"FPS:{int(fps.get())}", (500, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.putText(track, f"BAT:{battery}%", (500, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
-            cv2.putText(track, f"WIFI:{wifi_strength}%", (500, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
+            cv2.putText(track, f"WIFI:{wifi_strength}", (500, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.putText(track, f"MODE:{fly_mode}", (500, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
             cv2.putText(track, f"EXP:{exp_distance:.1f}m", (500, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1)
 
