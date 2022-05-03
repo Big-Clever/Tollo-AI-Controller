@@ -46,7 +46,7 @@ def drawPoints(img, points):
     """绘制航迹"""
     for point in points:
         cv2.circle(img, (int(point[0]), int(point[1])), 3, (0, 0, 255), cv2.FILLED)
-    cv2.putText(img, f"({((points[-1][0] - 288) / 10):.1f}, {-((points[-1][1] - 360) / 10):.1f})m",
+    cv2.putText(img, f"({((points[-1][0] - 288) / 30):.1f}, {-((points[-1][1] - 360) / 30):.1f})m",
                 (int(points[-1][0]) + 10, int(points[-1][1]) + 30), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 255), 1)
 
 
@@ -167,8 +167,8 @@ def handler(event, sender, data, **args):
     drone = sender
     global pos_x, pos_y, yaw, battery, wifi_strength, points, fly_mode
     if event is drone.EVENT_LOG_DATA:  # 每秒15帧数据
-        pos_x += data.mvo.vel_y / 15
-        pos_y -= data.mvo.vel_x / 15
+        pos_x += data.mvo.vel_y / 5
+        pos_y -= data.mvo.vel_x / 5
         """记录飞行轨迹点"""
         if (points[-1][0] != pos_x) or (points[-1][1] != pos_y):
             points.append([pos_x, pos_y])
@@ -190,7 +190,6 @@ def data_processing(share):
     drone.subscribe(drone.EVENT_FLIGHT_DATA, handler)
     drone.subscribe(drone.EVENT_LOG_DATA, handler)
     cv2.namedWindow("UAV")
-    # cv2.setWindowProperty("UAV", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.resizeWindow("UAV", 1536, 720)
     cv2.setMouseCallback("UAV", capture_mouse_event)
     draw_pose = DrawPose.DrawPose()
@@ -356,8 +355,8 @@ def data_processing(share):
                 posedata["candidate"][:, 0:2] = posedata["candidate"][:, 0:2] / scale
                 posedata["candidate"][:, 0] += target_size[0]
                 posedata["candidate"][:, 1] += target_size[1]
-                if time.perf_counter() - pose_time < 0.2:
-                    image = draw_pose(image, posedata["candidate"], posedata["subset"])
+                # if time.perf_counter() - pose_time < 0.2:
+                #     image = draw_pose(image, posedata["candidate"], posedata["subset"])
                 """若为新数据，则进行处理"""
                 if pose_res_last[2] != pose_res[2]:
                     pose_res_last[2] = pose_res[2]
@@ -431,10 +430,11 @@ def data_processing(share):
             cv2.waitKey(1)
             if fly_mode == 1:
                 cm.eval(image)  # 摄像头作按键检测
-            if raw_frame.time_base < 1.0 / 40:
-                time_base = 1.0 / 40
-            else:
-                time_base = raw_frame.time_base
+            # if raw_frame.time_base < 1.0 / 40:
+            #     time_base = 1.0 / 40
+            # else:
+            #     time_base = raw_frame.time_base
+            time_base = 1.0 / 40
             frame_skip = int((time.perf_counter() - start_time) / time_base)
 
 
@@ -458,5 +458,5 @@ if __name__ == '__main__':
     # Depth_estimation.start()  # 深度估计进程
 
     while True:
-        gc.collect()  # 内存回收
+        # gc.collect()  # 内存回收
         time.sleep(1)

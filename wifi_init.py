@@ -23,7 +23,8 @@ class wifi(object):
                 # if i.signal > -90:  # 信号强度<-90的wifi几乎连不上
                 #     wifi_list.append((i.ssid, i.signal))  # 添加到wifi列表
                 #     # print('wifi信号强度：{0}，名称：{1}。'.format(i.signal, i.ssid))  # 输出wifi名称
-                if i.ssid == "TELLO" or i.ssid == "TELLO-AB8717":#-AB8717
+                # if i.ssid == "TELLO" or i.ssid == "TELLO-AB8717":#-AB8717
+                if i.ssid.startswith("TELLO"):
                     self.minifly_find += 1
                     print('wifi信号强度：{0}，名称：{1}。'.format(i.signal, i.ssid))  # 输出wifi名称
                     wifi_list.append(i.ssid)  # 添加到wifi列表
@@ -67,8 +68,10 @@ def connect(wifi_name):
     print("已搜索到Tello无人机")
     if "TELLO" in wifi_list:
         wifi_name.connect_wifi("TELLO")#-AB8717
-    else:
+    elif "TELLO-AB8717" in wifi_list:
         wifi_name.connect_wifi("TELLO-AB8717")  # -AB8717
+    else:
+        wifi_name.connect_wifi("TELLO-635876")  # -635876
     # time.sleep(3)  # 等待3秒后，才能接收到图像
 
 

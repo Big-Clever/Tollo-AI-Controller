@@ -7,7 +7,7 @@ class RollingGraph:
     """
         Class designed to draw in an OpenCv window, graph of variables evolving with time.
         The time is not absolute here, but each new call to method 'new_iter' corresponds to a time step.
-        'new_iter' takes as argument an array of the current variable values  
+        'new_iter' takes as argument an array of the current variable values
     """
 
     def __init__(self, window_name="Graph", width=640, height=250, step_width=5, y_min=0, y_max=255,
@@ -64,7 +64,7 @@ class CameraMorse:
     """
         Designed with the Tello drone in mind but could be used with other small cameras.
         When the Tello drone is not flying, we can use its camera as a way to pass commands to the calling script.
-        Covering/uncovering the camera with a finger, is like pressing/releasing a button. 
+        Covering/uncovering the camera with a finger, is like pressing/releasing a button.
         Covering/uncovering the camera is determined by calculating the level of brightness of the frames received from the camera
         Short press = dot
         Long press = dash
@@ -76,14 +76,14 @@ class CameraMorse:
             display : True to display to display brightness(time) in an opencv window (via an object RollingGraph)
         """
         # Durations below are in seconds
-        # 0 < duration of a dash <= dot_duration 
+        # 0 < duration of a dash <= dot_duration
         self.dot_duration = dot_duration
         # dot_duration < duration of a dash <= dash_duration
         if dash_duration is None:
             self.dash_duration = 3 * dot_duration
         else:
             self.dash_duration = dash_duration
-        # Released duration. 
+        # Released duration.
         if blank_duration is None:
             self.blank_duration = 3 * dot_duration
         else:
@@ -95,10 +95,10 @@ class CameraMorse:
         # Then when brightness goes back above 'threshold' = "release" action
         self.threshold = threshold
 
-        # Dictionary that associates codes to commands 
+        # Dictionary that associates codes to commands
         self.commands = {}
 
-        # Current status 
+        # Current status
         self.is_pressed = False
 
         # Timestamp of the last status change (pressed/released)
@@ -115,7 +115,7 @@ class CameraMorse:
         """
             Add a (code, command, args) to the dictionary of the command
             'command' is a python function
-            kwargs is a optionnal dictionary of keyword arguments that will be passed to function 'command' 
+            kwargs is a optionnal dictionary of keyword arguments that will be passed to function 'command'
             when it will be called. Called this way: command(**kwargs)
             Beware that if code1 is a prefix of code2, the command associated to code2 will never be called !
         """
@@ -123,7 +123,7 @@ class CameraMorse:
 
     def is_pressing(self, frame):
         """
-            Calculate the brightness of a frame and 
+            Calculate the brightness of a frame and
             returns True if the brightness is below 'threshold' (= pressing)
         """
         self.brightness = np.mean(frame)
@@ -139,7 +139,7 @@ class CameraMorse:
 
     def eval(self, frame):
         """
-            Analyze the frame 'frame', detect potential 'dot' or 'dash', and if so, check 
+            Analyze the frame 'frame', detect potential 'dot' or 'dash', and if so, check
             if we get a defined code
             Returns:
             - a boolean which indicates if the "button is pressed" or not,
